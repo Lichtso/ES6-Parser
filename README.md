@@ -1,2 +1,4 @@
 # ES6-Parser
-Lightweight parser for ES6 JavaScript
+A lightweight parser written in and for ES6 JavaScript
+
+`node --experimental-modules Parser.mjs`
