@@ -127,7 +127,7 @@ export class ES6ModuleParser {
             }
             if(!parameterListEvent)
                 throw new Error(`expected a parameter list at ${event.offset} ${event.lineIndex}`);
-            const body = this.sourceCode.substr(bodyEvent.offset, bodyEvent.length),
+            const body = this.sourceCode.substr(bodyEvent.offset+1, bodyEvent.length),
                   prevEvent = this.eventStream[parameterListEvent.beginIndex-1],
                   lastOffset = prevEvent.offset+((classBodyEvent == prevEvent) ? 0 : prevEvent.length)+1,
                   attributeString = this.sourceCode.substring(lastOffset, parameterListEvent.offset).trim(),
