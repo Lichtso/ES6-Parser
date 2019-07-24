@@ -1,0 +1,13 @@
+{
+  "name": "ES6-Parser",
+  "version": "0.0.0",
+  "authors": [
+    "Alexander Meißner"
+  ],
+  "license": "MIT",
+  "module": "Parser.mjs",
+  "dependencies": {
+    "tree-sitter": "^0.15.7",
+    "tree-sitter-javascript": "^0.15.1"
+  }
+}
