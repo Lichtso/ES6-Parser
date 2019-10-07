@@ -1,4 +1,5 @@
-# ES6-Parser
-A lightweight parser written in and for ES6 JavaScript
+# Evaluation for my Master Thesis
+Parse and migrate a GIT repository containing ES6 JavaScript into a version-controlled graph-database to analyze it semantically using graph queries.
 
-`node --experimental-modules Parser.mjs`
+## Usage
+`time node --max-old-space-size=4096 -expose-gc --always-compact --experimental-modules RepoMigration.mjs PathToGitRepo/ git-branch-name`

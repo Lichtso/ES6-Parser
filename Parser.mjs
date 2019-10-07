@@ -12,7 +12,6 @@ export function parseFile(filePath) {
           ast = parser.parse(fileContent),
           cursor = ast.walk(),
           moduleEntry = {'identifier': filePath, 'classes': {}};
-    // console.log(ast.rootNode.toString());
     function nodeContent(node) {
         return fileContent.substring(node.startIndex, node.endIndex);
     }
@@ -68,7 +67,8 @@ export function parseFile(filePath) {
                             case 'method_definition':
                                 const methodEntry = methodWalk();
                                 methodEntry.globalIdentifier = `${classEntry.identifier}::${[...methodEntry.attributes, methodEntry.identifier].join(',')}`;
-                                classEntry.methods[methodEntry.globalIdentifier] = methodEntry;
+                                if(methodEntry.identifier)
+                                    classEntry.methods[methodEntry.globalIdentifier] = methodEntry;
                                 break;
                         }
                     } while(cursor.gotoNextSibling());
@@ -89,7 +89,8 @@ export function parseFile(filePath) {
                 case 'class':
                 case 'class_declaration':
                     const classEntry = classWalk();
-                    moduleEntry.classes[classEntry.identifier] = classEntry;
+                    if(classEntry.identifier)
+                        moduleEntry.classes[classEntry.identifier] = classEntry;
                     break;
             }
         } while(cursor.gotoNextSibling());
@@ -97,20 +98,4 @@ export function parseFile(filePath) {
     }
     recursiveTreeWalk();
     return moduleEntry;
-}
-
-export function exploreDirectory(directoryPath, moduleMap={}) {
-    const directory = fs.readdirSync(directoryPath);
-    for(const fileName of directory) {
-        const filePath = directoryPath+fileName;
-        if(fs.lstatSync(filePath).isDirectory())
-            exploreDirectory(filePath+'/', moduleMap);
-        else if(path.extname(filePath) === '.js')
-            try {
-                moduleMap[filePath] = parseFile(filePath);
-            } catch(error) {
-                console.error(filePath, error);
-            }
-    }
-    return moduleMap;
 }
