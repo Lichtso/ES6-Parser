@@ -13,7 +13,7 @@ const performanceObserver = new PerformanceObserver((list) => {
             performanceProfile[entry.name] = entry.duration*0.001;
     }
 });
-performanceObserver.observe({'entryTypes': ['function']});
+performanceObserver.observe({'entryTypes': ['gc', 'measure', 'function']});
 
 export function formatMemoryUsage(usage, maximum) {
     const percentage = usage/maximum*100;

@@ -5,7 +5,7 @@ import {performance} from 'perf_hooks';
 
 import {parserSymbols, repositoryNamespace, recordingNamespace, modalNamespace} from './Config.mjs';
 import {performanceProfile, formatMemoryUsage, insertIntoMapOfSets} from './Utils.mjs';
-import {loaded, BasicBackend, JavaScriptBackend, RustWasmBackend, Differential, Repository} from './node_modules/SymatemJS/dist/SymatemJS.mjs';
+import {loaded, BasicBackend, JavaScriptBackend, RustWasmBackend, Diff, Repository} from 'SymatemJS';
 
 loaded.then(() => {
     const backend = new RustWasmBackend();
@@ -24,27 +24,27 @@ loaded.then(() => {
     }
 
     const pwdPath = path.dirname(process.argv[1]),
-          differentialsPath = path.join(pwdPath, 'differentials');
-    repository.versions = JSON.parse(fs.readFileSync(path.join(differentialsPath, 'versionDAG.json'), 'utf8'));
+          diffsPath = path.join(pwdPath, 'diffs');
+    repository.versions = JSON.parse(fs.readFileSync(path.join(diffsPath, 'versionDAG.json'), 'utf8'));
 
-    function loadDifferentials() {
+    function loadDiffs() {
         for(const versionId in repository.versions) {
             const edges = repository.versions[versionId].parents,
                   parents = Object.keys(edges);
-            if(parents.length == 1) {
+            if(parents.length == 1 && edges[parents[0]]) {
                 const name = edges[parents[0]],
-                      differential = new Differential(backend, {[recordingNamespace]: modalNamespace}, repositoryNamespace);
-                differential.decodeJson(fs.readFileSync(path.join(differentialsPath, edges[parents[0]]), 'utf8'));
-                differential.link(repositoryNamespace);
-                backend.setData(differential.symbol, edges[parents[0]]);
-                console.log(edges[parents[0]],
-                    analyzeTripleOperations(differential.postCommitStructure.linkTripleOperations),
-                    analyzeTripleOperations(differential.postCommitStructure.unlinkTripleOperations)
+                      diff = new Diff(backend, {[recordingNamespace]: modalNamespace}, repositoryNamespace);
+                diff.decodeJson(fs.readFileSync(path.join(diffsPath, name), 'utf8'));
+                diff.link(repositoryNamespace);
+                backend.setData(diff.symbol, name);
+                console.log(name,
+                    analyzeTripleOperations(diff.postCommitStructure.linkTripleOperations),
+                    analyzeTripleOperations(diff.postCommitStructure.unlinkTripleOperations)
                 );
             }
         }
     }
-    performance.timerify(loadDifferentials)();
+    performance.timerify(loadDiffs)();
     console.log(`JS-heap: ${formatMemoryUsage(process.memoryUsage().heapUsed, 4294967296)}, WASM: ${formatMemoryUsage(backend.getMemoryUsage(), 4294967296)}`);
 
     let repoSymbolCount = 0, modalSymbolCount = 0, tripleCount = 0;
@@ -56,7 +56,7 @@ loaded.then(() => {
         ++tripleCount;
     console.log(`${repoSymbolCount} Repository Symbols, ${modalSymbolCount} Modal Symbols, ${tripleCount} Triples`);
 
-    function getNameOfSymbolFromDifferential(symbol) {
+    function getNameOfSymbolFromDiff(symbol) {
         for(const triple of backend.queryTriples(BasicBackend.queryMasks.VMM, [BasicBackend.symbolByName.Void, BasicBackend.symbolByName.Destination, symbol])) {
             const replaceDataOperation = triple[0],
                   differentalSymbol = backend.getPairOptionally(BasicBackend.symbolByName.ReplaceData, replaceDataOperation, BasicBackend.queryMasks.VMM);
@@ -77,8 +77,8 @@ loaded.then(() => {
             insertIntoMapOfSets(methodsSetMap,
                 backend.getPairOptionally(triple[0], BasicBackend.symbolByName.Value),
                 backend.getPairOptionally(BasicBackend.symbolByName.Void, triple[0], BasicBackend.queryMasks.VIM));
-        for(const [methodSymbol, differentials] of [...methodsSetMap.entries()].sort((a, b) => a[1].size - b[1].size))
-            result[getNameOfSymbolFromDifferential(methodSymbol)] = [...differentials].map(differential => backend.getData(differential));
+        for(const [methodSymbol, diffs] of [...methodsSetMap.entries()].sort((a, b) => a[1].size - b[1].size))
+            result[getNameOfSymbolFromDiff(methodSymbol)] = [...diffs].map(diff => backend.getData(diff));
         return result;
     }
     console.log(performance.timerify(queryMethodChanges)());

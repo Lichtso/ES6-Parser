@@ -5,11 +5,13 @@ import TreeSitterJavaScript from 'tree-sitter-javascript';
 const parser = new TreeSitter();
 parser.setLanguage(TreeSitterJavaScript);
 
-export function parseFile(filePath) {
-    if(!fs.existsSync(filePath))
-        return;
-    const fileContent = fs.readFileSync(filePath, 'utf8'),
-          ast = parser.parse(fileContent),
+export function parseFile(filePath, fileContent) {
+    if(!fileContent) {
+        if(!fs.existsSync(filePath))
+            return;
+        fileContent = fs.readFileSync(filePath, 'utf8');
+    }
+    const ast = parser.parse(fileContent),
           cursor = ast.walk(),
           moduleEntry = {'identifier': filePath, 'classes': {}};
     function nodeContent(node) {
