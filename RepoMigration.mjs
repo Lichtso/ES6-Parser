@@ -76,6 +76,7 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
         return changesOccured;
     }
     if(!moduleExisted) {
+        backend.manifestSymbol(moduleSymbol);
         backend.setTriple([BasicBackend.symbolByName.Root, BasicBackend.symbolByName.Module, moduleSymbol], true);
         if(backend.getLength(moduleSymbol) != moduleIdentifier.length*8)
             backend.setData(moduleSymbol, moduleIdentifier);
@@ -86,6 +87,7 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
         const classEntry = moduleEntry.classes[classIdentifier],
               classSymbol = identifierToSymbol(prefix+classEntry.identifier);
         if(!backend.getTriple([moduleSymbol, BasicBackend.symbolByName.Class, classSymbol])) {
+            backend.manifestSymbol(classSymbol);
             backend.setTriple([moduleSymbol, BasicBackend.symbolByName.Class, classSymbol], true);
             if(backend.getLength(classSymbol) != classIdentifier.length*8)
                 backend.setData(classSymbol, classIdentifier);
@@ -98,6 +100,7 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
                   methodBodySymbol = identifierToSymbol(prefix+methodEntry.body),
                   prevMethodBodySymbol = backend.getPairOptionally(methodSymbol, BasicBackend.symbolByName.MethodBody);
             if(!backend.getTriple([classSymbol, BasicBackend.symbolByName.Method, methodSymbol])) {
+                backend.manifestSymbol(methodSymbol);
                 backend.setTriple([classSymbol, BasicBackend.symbolByName.Method, methodSymbol], true);
                 if(backend.getLength(methodSymbol) != methodEntry.globalIdentifier.length*8)
                     backend.setData(methodSymbol, methodEntry.globalIdentifier);
@@ -105,6 +108,7 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
                 changesOccured = true;
             }
             if(methodBodySymbol != prevMethodBodySymbol) {
+                backend.manifestSymbol(methodBodySymbol);
                 backend.setTriple([methodSymbol, BasicBackend.symbolByName.MethodBody, methodBodySymbol], true);
                 if(backend.getLength(methodBodySymbol) != methodEntry.body.length*8)
                     backend.setData(methodBodySymbol, methodEntry.body);
@@ -157,13 +161,13 @@ function processGitDiff(parentVersionId, childVersionId) {
         for(const entry of parsedFiles)
             if(entry[1])
                 entry[1] = parseFile(entry[0], entry[1]);
-        performance.mark('compare');
-        performance.measure('parse', 'parse', 'compare');
+        performance.mark('record');
+        performance.measure('parse', 'parse', 'record');
         for(const [filePath, moduleEntry] of parsedFiles)
             if(compareFile(outDiff, filePath, moduleEntry))
                 changesOccured = true;
         performance.mark('commit');
-        performance.measure('compare', 'compare', 'commit');
+        performance.measure('record', 'record', 'commit');
         outDiff.compressData();
         outDiff.commit();
         performance.mark('write to disk');
@@ -253,8 +257,15 @@ function walkVersionDAG(versionsIn) {
             lastPromise = lastPromise.then(() => {
                 const progress = forwardCounter/edgeCount,
                       timeSpent = process.hrtime()[0]-startTime,
-                      remainingSeconds = (1.0-progress)*timeSpent/progress;
-                console.log(`Edges: ${forwardCounter}/${edgeCount} (${(progress*100).toFixed(2)}%), JS-heap: ${formatMemoryUsage(process.memoryUsage().heapUsed, 4294967296)}, WASM: ${formatMemoryUsage(backend.getMemoryUsage(), 2147483648)}, remaining: ${Math.round(remainingSeconds)}s`);
+                      remainingSeconds = (1.0-progress)*timeSpent/progress,
+                      messages = [
+                          `Remaining: ${Math.round(remainingSeconds)}s`,
+                          `Edges: ${forwardCounter}/${edgeCount} (${(progress*100).toFixed(2)}%)`,
+                          `JS-heap: ${formatMemoryUsage(process.memoryUsage().heapUsed, 4294967296)}`
+                      ];
+                if(backend instanceof RustWasmBackend)
+                    messages.push(`WASM: ${formatMemoryUsage(backend.getMemoryUsage(), 2147483648)}`);
+                console.log(messages.join(', '));
             });
             lastPromise = trackUntilMerge(versionsIn, stack, lastPromise);
             if(forkCounter == 0)
@@ -270,7 +281,7 @@ function walkVersionDAG(versionsIn) {
 }
 
 loaded.then(() => {
-    backend = new RustWasmBackend();
+    backend = (true) ? new RustWasmBackend() : new JavaScriptBackend();
     backend.initPredefinedSymbols();
     outRepo = new Repository(backend, repositoryNamespace);
     parserNamespace = backend.registerAdditionalSymbols('ES6 Parser', parserSymbols);
