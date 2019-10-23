@@ -22,7 +22,8 @@ fs.mkdirSync(outDiffsPath);
 
 let inRepo, outRepo, backend, parserNamespace,
     vertexCount = 0, orphanCount = 0, edgeCount = 0, forwardCounter = 0, backwardCounter = 0, forkCounter = 0;
-const emptyTreeHash = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+      fileExtensionWhitelist = {'.js': true, '.mjs': true};
 
 function identifierToSymbol(identifier) {
     const hash = crypto.createHash('md5');
@@ -130,7 +131,7 @@ function processGitDiff(parentVersionId, childVersionId) {
     let childTree, changesOccured = false;
     const outDiff = new Diff(backend, {[recordingNamespace]: modalNamespace}, repositoryNamespace);
     return Promise.all([
-        nodegit.Commit.lookup(inRepo, parentVersionId).then((commit) => commit.getTree()),
+        (parentVersionId == emptyTree) ? nodegit.Tree.lookup(inRepo, emptyTree) : nodegit.Commit.lookup(inRepo, parentVersionId).then((commit) => commit.getTree()),
         nodegit.Commit.lookup(inRepo, childVersionId).then((commit) => commit.getTree())
     ]).then((trees) => {
         childTree = trees[1];
@@ -140,13 +141,12 @@ function processGitDiff(parentVersionId, childVersionId) {
         const promisePool = [];
         for(let i = 0; i < diff.numDeltas(); ++i) {
             const delta = diff.getDelta(i);
-            // console.log('Delta', delta.newFile().path(), delta.oldFile().path(), delta.status());
             console.assert(delta.status() == nodegit.Diff.DELTA.ADDED || delta.status() == nodegit.Diff.DELTA.MODIFIED || delta.status() == nodegit.Diff.DELTA.DELETED || delta.status() == nodegit.Diff.DELTA.RENAMED);
             let filePath = delta.oldFile().path();
-            if(path.extname(filePath) == '.js' && (delta.status() == nodegit.Diff.DELTA.DELETED || delta.status() == nodegit.Diff.DELTA.RENAMED))
+            if(fileExtensionWhitelist[path.extname(filePath)] && (delta.status() == nodegit.Diff.DELTA.DELETED || delta.status() == nodegit.Diff.DELTA.RENAMED))
                 promisePool.push(new Promise((resolve, reject) => resolve([filePath, undefined])));
             filePath = delta.newFile().path();
-            if(path.extname(filePath) == '.js' && (delta.status() == nodegit.Diff.DELTA.ADDED || delta.status() == nodegit.Diff.DELTA.MODIFIED || delta.status() == nodegit.Diff.DELTA.RENAMED))
+            if(fileExtensionWhitelist[path.extname(filePath)] && (delta.status() == nodegit.Diff.DELTA.ADDED || delta.status() == nodegit.Diff.DELTA.MODIFIED || delta.status() == nodegit.Diff.DELTA.RENAMED))
                 promisePool.push(childTree.entryByPath(filePath)
                 .then((treeEntry) => inRepo.getBlob(treeEntry.id()))
                 .then((blob) => blob.content().toString())
@@ -297,6 +297,8 @@ loaded.then(() => {
             commit.getParents().then((parents) => {
                 for(const parent of parents)
                     outRepo.addDiff(parent.sha(), commit.sha(), false);
+                if(parents.length == 0)
+                    outRepo.addDiff(emptyTree, commit.sha(), false);
             });
         });
         history.on('end', function(commits) {
