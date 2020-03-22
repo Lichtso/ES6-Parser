@@ -6,7 +6,7 @@ import fs from 'fs';
 import {performance} from 'perf_hooks';
 import nodegit from 'nodegit';
 
-import {parserSymbols, repositoryNamespace, recordingNamespace, modalNamespace} from './Config.mjs';
+import {Namespaces} from './Config.mjs';
 import {performanceProfile, formatMemoryUsage, nonEmptyRmdirSync} from './Utils.mjs';
 import {parseFile} from './Parser.mjs';
 import {loaded, SymbolInternals, BasicBackend, JavaScriptBackend, RustWasmBackend, Diff, Repository} from 'SymatemJS';
@@ -20,15 +20,15 @@ const pwdPath = path.dirname(process.argv[1]),
 nonEmptyRmdirSync(outDiffsPath);
 fs.mkdirSync(outDiffsPath);
 
-let inRepo, outRepo, backend, parserNamespace,
+let inRepo, outRepo, backend, namespaces, emptyVersion,
     vertexCount = 0, orphanCount = 0, edgeCount = 0, forwardCounter = 0, backwardCounter = 0, forkCounter = 0;
-const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+const versions = {}, orphans = [],
       fileExtensionWhitelist = {'.js': true, '.mjs': true};
 
 function identifierToSymbol(identifier) {
     const hash = crypto.createHash('md5');
     hash.update(identifier, 'utf8');
-    return SymbolInternals.concatIntoSymbol(recordingNamespace, parseInt(hash.digest('hex').substr(0, 8), 16));
+    return SymbolInternals.concatIntoSymbol(namespaces.Recording, parseInt(hash.digest('hex').substr(0, 8), 16));
 }
 
 function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
@@ -39,37 +39,39 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
 
     let changesOccured = false;
     const moduleSymbol = identifierToSymbol(prefix+moduleIdentifier);
-    for(const classSymbol of backend.getAndSetPairs(moduleSymbol, BasicBackend.symbolByName.Class)) {
+    for(const classSymbol of backend.getAndSetPairs(moduleSymbol, backend.symbolByName.Class)) {
         const classIdentifier = backend.getData(classSymbol),
               classEntry = (moduleEntry) ? moduleEntry.classes[classIdentifier] : undefined;
-        for(const methodSymbol of backend.getAndSetPairs(classSymbol, BasicBackend.symbolByName.Method)) {
-            const methodBodySymbol = backend.getPairOptionally(methodSymbol, BasicBackend.symbolByName.MethodBody),
+        for(const methodSymbol of backend.getAndSetPairs(classSymbol, backend.symbolByName.Method)) {
+            const methodBodySymbol = backend.getPairOptionally(methodSymbol, backend.symbolByName.MethodBody),
                   methodIdentifier = backend.getData(methodSymbol),
                   methodEntry = (classEntry) ? classEntry.methods[methodIdentifier] : undefined;
             if(!methodEntry) {
-                backend.setTriple([methodSymbol, BasicBackend.symbolByName.MethodBody, methodBodySymbol], false);
-                if(!backend.getTriple([BasicBackend.symbolByName.Void, BasicBackend.symbolByName.Void, methodBodySymbol], BasicBackend.queryMasks.IIM))
+                backend.setTriple([methodSymbol, backend.symbolByName.MethodBody, methodBodySymbol], false);
+                if(!backend.getTriple([backend.symbolByName.Void, backend.symbolByName.Void, methodBodySymbol], BasicBackend.queryMasks.IIM)) {
                     backend.unlinkSymbol(methodBodySymbol);
-                backend.setTriple([classSymbol, BasicBackend.symbolByName.Method, methodSymbol], false);
-                if(!backend.getTriple([BasicBackend.symbolByName.Void, BasicBackend.symbolByName.Void, methodSymbol], BasicBackend.queryMasks.IIM))
+                    console.log(`- MethodBody ${methodBodySymbol}`);
+                }
+                backend.setTriple([classSymbol, backend.symbolByName.Method, methodSymbol], false);
+                if(!backend.getTriple([backend.symbolByName.Void, backend.symbolByName.Void, methodSymbol], BasicBackend.queryMasks.IIM))
                     backend.unlinkSymbol(methodSymbol);
                 console.log(`- Method ${methodIdentifier} ${methodBodySymbol}`);
                 changesOccured = true;
             }
         }
         if(!classEntry) {
-            backend.setTriple([moduleSymbol, BasicBackend.symbolByName.Class, classSymbol], false);
-            if(!backend.getTriple([BasicBackend.symbolByName.Void, BasicBackend.symbolByName.Void, classSymbol], BasicBackend.queryMasks.IIM))
+            backend.setTriple([moduleSymbol, backend.symbolByName.Class, classSymbol], false);
+            if(!backend.getTriple([backend.symbolByName.Void, backend.symbolByName.Void, classSymbol], BasicBackend.queryMasks.IIM))
                 backend.unlinkSymbol(classSymbol);
             console.log(`- Class ${classIdentifier}`);
             changesOccured = true;
         }
     }
-    const moduleExisted = backend.getTriple([BasicBackend.symbolByName.Root, BasicBackend.symbolByName.Module, moduleSymbol]);
+    const moduleExisted = backend.getTriple([backend.symbolByName.Root, backend.symbolByName.Module, moduleSymbol]);
     if(!moduleEntry) {
         if(moduleExisted) {
-            backend.setTriple([BasicBackend.symbolByName.Root, BasicBackend.symbolByName.Module, moduleSymbol], false);
-            if(!backend.getTriple([BasicBackend.symbolByName.Void, BasicBackend.symbolByName.Void, moduleSymbol], BasicBackend.queryMasks.IIM))
+            backend.setTriple([backend.symbolByName.Root, backend.symbolByName.Module, moduleSymbol], false);
+            if(!backend.getTriple([backend.symbolByName.Void, backend.symbolByName.Void, moduleSymbol], BasicBackend.queryMasks.IIM))
                 backend.unlinkSymbol(moduleSymbol);
             console.log(`- Module ${moduleIdentifier}`);
             changesOccured = true;
@@ -78,7 +80,7 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
     }
     if(!moduleExisted) {
         backend.manifestSymbol(moduleSymbol);
-        backend.setTriple([BasicBackend.symbolByName.Root, BasicBackend.symbolByName.Module, moduleSymbol], true);
+        backend.setTriple([backend.symbolByName.Root, backend.symbolByName.Module, moduleSymbol], true);
         if(backend.getLength(moduleSymbol) != moduleIdentifier.length*8)
             backend.setData(moduleSymbol, moduleIdentifier);
         console.log(`+ Module ${moduleIdentifier}`);
@@ -87,9 +89,9 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
     for(const classIdentifier in moduleEntry.classes) {
         const classEntry = moduleEntry.classes[classIdentifier],
               classSymbol = identifierToSymbol(prefix+classEntry.identifier);
-        if(!backend.getTriple([moduleSymbol, BasicBackend.symbolByName.Class, classSymbol])) {
+        if(!backend.getTriple([moduleSymbol, backend.symbolByName.Class, classSymbol])) {
             backend.manifestSymbol(classSymbol);
-            backend.setTriple([moduleSymbol, BasicBackend.symbolByName.Class, classSymbol], true);
+            backend.setTriple([moduleSymbol, backend.symbolByName.Class, classSymbol], true);
             if(backend.getLength(classSymbol) != classIdentifier.length*8)
                 backend.setData(classSymbol, classIdentifier);
             console.log(`+ Class ${classIdentifier}`);
@@ -99,10 +101,10 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
             const methodEntry = classEntry.methods[methodIdentifier],
                   methodSymbol = identifierToSymbol(prefix+methodEntry.globalIdentifier),
                   methodBodySymbol = identifierToSymbol(prefix+methodEntry.body),
-                  prevMethodBodySymbol = backend.getPairOptionally(methodSymbol, BasicBackend.symbolByName.MethodBody);
-            if(!backend.getTriple([classSymbol, BasicBackend.symbolByName.Method, methodSymbol])) {
+                  prevMethodBodySymbol = backend.getPairOptionally(methodSymbol, backend.symbolByName.MethodBody);
+            if(!backend.getTriple([classSymbol, backend.symbolByName.Method, methodSymbol])) {
                 backend.manifestSymbol(methodSymbol);
-                backend.setTriple([classSymbol, BasicBackend.symbolByName.Method, methodSymbol], true);
+                backend.setTriple([classSymbol, backend.symbolByName.Method, methodSymbol], true);
                 if(backend.getLength(methodSymbol) != methodEntry.globalIdentifier.length*8)
                     backend.setData(methodSymbol, methodEntry.globalIdentifier);
                 console.log(`+ Method ${methodIdentifier} ${methodBodySymbol}`);
@@ -110,15 +112,19 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
             }
             if(methodBodySymbol != prevMethodBodySymbol) {
                 backend.manifestSymbol(methodBodySymbol);
-                backend.setTriple([methodSymbol, BasicBackend.symbolByName.MethodBody, methodBodySymbol], true);
-                if(backend.getLength(methodBodySymbol) != methodEntry.body.length*8)
+                backend.setTriple([methodSymbol, backend.symbolByName.MethodBody, methodBodySymbol], true);
+                if(backend.getLength(methodBodySymbol) != methodEntry.body.length*8) {
                     backend.setData(methodBodySymbol, methodEntry.body);
+                    console.log(`+ MethodBody ${methodBodySymbol}`);
+                }
                 changesOccured = true;
-                if(prevMethodBodySymbol != BasicBackend.symbolByName.Void) {
-                    backend.setTriple([methodSymbol, BasicBackend.symbolByName.MethodBody, prevMethodBodySymbol], false);
-                    if(!backend.getTriple([BasicBackend.symbolByName.Void, BasicBackend.symbolByName.Void, prevMethodBodySymbol], BasicBackend.queryMasks.IIM))
+                if(prevMethodBodySymbol != backend.symbolByName.Void) {
+                    backend.setTriple([methodSymbol, backend.symbolByName.MethodBody, prevMethodBodySymbol], false);
+                    if(!backend.getTriple([backend.symbolByName.Void, backend.symbolByName.Void, prevMethodBodySymbol], BasicBackend.queryMasks.IIM)) {
                         backend.unlinkSymbol(prevMethodBodySymbol);
-                    console.log(`* Method ${methodIdentifier} ${methodBodySymbol}`);
+                        console.log(`- MethodBody ${methodBodySymbol}`);
+                    }
+                    console.log(`* MethodBody ${methodIdentifier} ${prevMethodBodySymbol} => ${methodBodySymbol}`);
                 }
             }
         }
@@ -126,13 +132,13 @@ function compareFile(backend, moduleIdentifier, moduleEntry, prefix='') {
     return changesOccured;
 }
 
-function processGitDiff(parentVersionId, childVersionId) {
-    ++forwardCounter; console.log(`${parentVersionId} --> ${childVersionId}`);
+function processGitDiff(parentVersion, childVersion) {
+    ++forwardCounter; console.log(`${parentVersion.hash} --> ${childVersion.hash}`);
     let childTree, changesOccured = false;
-    const outDiff = new Diff(backend, {[recordingNamespace]: modalNamespace}, repositoryNamespace);
+    const outDiff = new Diff(backend, outRepo.namespace, outRepo.relocationTable);
     return Promise.all([
-        (parentVersionId == emptyTree) ? nodegit.Tree.lookup(inRepo, emptyTree) : nodegit.Commit.lookup(inRepo, parentVersionId).then((commit) => commit.getTree()),
-        nodegit.Commit.lookup(inRepo, childVersionId).then((commit) => commit.getTree())
+        (parentVersion == emptyVersion) ? nodegit.Tree.lookup(inRepo, parentVersion.hash) : nodegit.Commit.lookup(inRepo, parentVersion.hash).then((commit) => commit.getTree()),
+        nodegit.Commit.lookup(inRepo, childVersion.hash).then((commit) => commit.getTree())
     ]).then((trees) => {
         childTree = trees[1];
         performance.mark('git diff');
@@ -174,85 +180,87 @@ function processGitDiff(parentVersionId, childVersionId) {
         performance.measure('commit', 'commit', 'write to disk');
         const fileContent = outDiff.encodeJson();
         console.assert(changesOccured == (fileContent != '{}'));
-        if(fileContent != '{}') {
-            const outDiffName = `${parentVersionId}-${childVersionId}.json`;
-            outRepo.addDiff(parentVersionId, childVersionId, outDiffName);
-            fs.writeFileSync(path.join(outDiffsPath, outDiffName), fileContent);
+        if(changesOccured) {
+            const edge = outRepo.getEdge(parentVersion.symbol, childVersion.symbol);
+            if(childVersion.parentCount == 1) {
+                outDiff.link();
+                backend.setTriple([edge, backend.symbolByName.Diff, outDiff.symbol], true);
+            } else {
+                fs.writeFileSync(path.join(outDiffsPath, `${parentVersion.hash}-${childVersion.hash}.json`), fileContent);
+                backend.setTriple([edge, backend.symbolByName.Diff, backend.symbolByName.Diff], true);
+            }
         }
         performance.mark('unlink');
         performance.measure('write to disk', 'write to disk', 'unlink');
-        outDiff.unlink();
+        if(!outDiff.symbol)
+            outDiff.unlink();
         return changesOccured;
     }).catch(err => console.error(err));
 }
 
-function findLooseEnd(versionsIn) {
-    for(const versionId in versionsIn)
-        if(versionsIn[versionId].parentsLeft == 0 && versionsIn[versionId].childrenLeft.length > 0)
-            return versionId;
-}
-
-function trackUntilMerge(versionsIn, stack, lastPromise) {
-    let versionId = stack[stack.length-1];
-    while(versionsIn[versionId].childrenLeft.length > 0) {
-        if(versionsIn[versionId].parentsLeft > 0)
+function trackUntilMerge(stack, lastPromise) {
+    let version = stack[stack.length-1];
+    while(version.childrenLeft.length > 0) {
+        if(version.parentsLeft > 0)
             break;
-        if(versionsIn[versionId].childrenLeft.length > 1)
+        if(version.childrenLeft.length > 1)
             ++forkCounter;
-        const nextVersionId = versionsIn[versionId].childrenLeft.shift(),
-              parentVersionId = versionId;
-        --versionsIn[nextVersionId].parentsLeft;
-        lastPromise = lastPromise.then(() => processGitDiff(parentVersionId, nextVersionId));
-        versionId = nextVersionId;
-        stack.push(nextVersionId);
+        const nextVersion = getVersion(backend.getData(version.childrenLeft.shift())),
+              parentVersion = version;
+        --nextVersion.parentsLeft;
+        lastPromise = lastPromise.then(() => processGitDiff(parentVersion, nextVersion));
+        version = nextVersion;
+        stack.push(nextVersion);
     }
     return lastPromise;
 }
 
-function revert(parentVersionId, childVersionId) {
-    ++backwardCounter; console.log(`${parentVersionId} <-- ${childVersionId}`);
-    const differentialName = outRepo.versions[parentVersionId].children[childVersionId];
-    if(differentialName) {
-        const differential = new Diff(backend, {[recordingNamespace]: modalNamespace}, repositoryNamespace);
-        performance.mark('read from disk');
-        differential.decodeJson(fs.readFileSync(path.join(outDiffsPath, differentialName), 'utf8'));
+function revert(parentVersion, childVersion) {
+    ++backwardCounter; console.log(`${parentVersion.hash} <-- ${childVersion.hash}`);
+    const edge = outRepo.getEdge(parentVersion.symbol, childVersion.symbol),
+          diffSymbol = backend.getPairOptionally(edge, backend.symbolByName.Diff);
+    if(diffSymbol != backend.symbolByName.Void) {
+        performance.mark('load diffs');
+        const diff = new Diff(backend, outRepo.namespace, outRepo.relocationTable, (diffSymbol != backend.symbolByName.Diff) ? diffSymbol : undefined);
+        if(!diff.symbol)
+            diff.decodeJson(fs.readFileSync(path.join(outDiffsPath, `${parentVersion.hash}-${childVersion.hash}.json`), 'utf8'));
         performance.mark('revert');
-        performance.measure('read from disk', 'read from disk', 'revert');
-        differential.apply(true, {[modalNamespace]: recordingNamespace});
+        performance.measure('load diffs', 'load diffs', 'revert');
+        diff.apply(true, {[namespaces.Modal]: namespaces.Recording});
         performance.mark('unlink');
         performance.measure('revert', 'revert', 'unlink');
-        differential.unlink();
+        if(!diff.symbol)
+            diff.unlink();
     }
 }
 
-function backtrackUntilFork(versionsIn, stack, lastPromise) {
-    let versionId = stack.pop();
+function backtrackUntilFork(stack, lastPromise) {
+    let version = stack.pop();
     for(let i = stack.length-1; i >= 0; --i) {
-        const nextVersionId = stack.pop(),
-              childVersionId = versionId;
-        lastPromise = lastPromise.then(() => revert(nextVersionId, childVersionId));
-        if(versionsIn[nextVersionId].childrenLeft.length > 0) {
+        const nextVersion = stack.pop(),
+              childVersion = version;
+        lastPromise = lastPromise.then(() => revert(nextVersion, childVersion));
+        if(nextVersion.childrenLeft.length > 0) {
             --forkCounter;
-            stack.push(nextVersionId);
+            stack.push(nextVersion);
             break;
         }
-        versionId = nextVersionId;
+        version = nextVersion;
     }
     return lastPromise;
 }
 
-function walkVersionDAG(versionsIn) {
+function walkVersionDAG() {
     const startTime = process.hrtime()[0];
     let lastPromise = new Promise((resolve, reject) => resolve());
-    while(true) {
-        const stack = [findLooseEnd(versionsIn)];
-        if(!stack[0])
-            break;
+    while(orphans.length > 0) {
+        const stack = [orphans.shift()];
         lastPromise = lastPromise.then(() => {
             // global.gc();
-            console.log(`Reset at ${stack[0]}`); ++orphanCount;
-            backend.unlinkSymbol(BasicBackend.symbolInNamespace('Namespaces', recordingNamespace));
+            console.log(`Reset at ${stack[0].hash}`);
+            backend.clearNamespace(namespaces.Recording);
         });
+        lastPromise = lastPromise.then(() => processGitDiff(emptyVersion, stack[0]));
         while(stack.length > 0) {
             lastPromise = lastPromise.then(() => {
                 const progress = forwardCounter/edgeCount,
@@ -267,24 +275,34 @@ function walkVersionDAG(versionsIn) {
                     messages.push(`WASM: ${formatMemoryUsage(backend.getMemoryUsage(), 2147483648)}`);
                 console.log(messages.join(', '));
             });
-            lastPromise = trackUntilMerge(versionsIn, stack, lastPromise);
+            lastPromise = trackUntilMerge(stack, lastPromise);
             if(forkCounter == 0)
                 break;
-            lastPromise = backtrackUntilFork(versionsIn, stack, lastPromise);
+            lastPromise = backtrackUntilFork(stack, lastPromise);
         }
     }
     return lastPromise.then(() => {
-        fs.writeFileSync(path.join(outDiffsPath, 'versionDAG.json'), JSON.stringify(outRepo.versions, undefined, '\t'));
+        fs.writeFileSync(path.join(outDiffsPath, 'repository.json'), backend.encodeJson([outRepo.namespace]), 'utf8');
         console.log(`vertexCount=${vertexCount}, orphanCount=${orphanCount}, edgeCount=${edgeCount}, forwardCounter=${forwardCounter}, backwardCounter=${backwardCounter}, ratio=${backwardCounter/forwardCounter}`);
         console.log(performanceProfile);
     });
 }
 
+function getVersion(versionHash) {
+    let version = versions[versionHash];
+    if(version)
+        return version;
+    version = versions[versionHash] = {'hash': versionHash, 'symbol': outRepo.createVersion()};
+    backend.setData(version.symbol, versionHash);
+    return version;
+}
+
 loaded.then(() => {
     backend = (true) ? new RustWasmBackend() : new JavaScriptBackend();
     backend.initPredefinedSymbols();
-    outRepo = new Repository(backend, repositoryNamespace);
-    parserNamespace = backend.registerAdditionalSymbols('ES6 Parser', parserSymbols);
+    namespaces = backend.registerNamespaces(Namespaces);
+    outRepo = new Repository(backend, namespaces.Repository, {[namespaces.Recording]: namespaces.Modal});
+    emptyVersion = getVersion('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
 
     nodegit.Repository.open(process.argv[2])
     .then((repo) => {
@@ -294,26 +312,29 @@ loaded.then(() => {
     .then((commit) => {
         const history = commit.history();
         history.on('commit', (commit) => {
+            const version = getVersion(commit.sha());
             commit.getParents().then((parents) => {
                 for(const parent of parents)
-                    outRepo.addDiff(parent.sha(), commit.sha(), false);
-                if(parents.length == 0)
-                    outRepo.addDiff(emptyTree, commit.sha(), false);
+                    outRepo.addEdge(getVersion(parent.sha()).symbol, version.symbol);
+                if(parents.length == 0) {
+                    outRepo.addEdge(emptyVersion.symbol, version.symbol);
+                    orphans.push(version);
+                }
             });
         });
         history.on('end', function(commits) {
             vertexCount = commits.length;
-            const versionsIn = {};
-            for(const versionId in outRepo.versions) {
-                versionsIn[versionId] = {
-                    parents: Object.keys(outRepo.versions[versionId].parents),
-                    children: Object.keys(outRepo.versions[versionId].children)
-                };
-                versionsIn[versionId].parentsLeft = versionsIn[versionId].parents.length;
-                versionsIn[versionId].childrenLeft = Array.from(versionsIn[versionId].children);
-                edgeCount += versionsIn[versionId].childrenLeft.length;
+            orphanCount = orphans.length;
+            for(const versionSymbol of outRepo.getVersions()) {
+                const version = versions[backend.getData(versionSymbol)];
+                version.parentCount = Object.keys(outRepo.getRelatives(versionSymbol, backend.symbolByName.Parent)).length;
+                version.parentsLeft = version.parentCount;
+                version.childrenLeft = Object.keys(outRepo.getRelatives(versionSymbol, backend.symbolByName.Child));
+                edgeCount += version.childrenLeft.length;
             }
-            walkVersionDAG(versionsIn);
+            for(const version of orphans)
+                version.parentsLeft = 0;
+            walkVersionDAG();
         });
         history.start();
     });

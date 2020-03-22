@@ -1,5 +1,6 @@
-export const
-    parserSymbols = ['Root', 'Module', 'Class', 'Method', 'MethodHead', 'MethodBody'],
-    repositoryNamespace = 4,
-    recordingNamespace = 5,
-    modalNamespace = 6;
+export const Namespaces = {
+    'ES6': ['Root', 'Module', 'Class', 'Method', 'MethodHead', 'MethodBody'],
+    'Repository': [],
+    'Recording': [],
+    'Modal': []
+};

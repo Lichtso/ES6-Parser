@@ -1,4 +1,3 @@
-import path from 'path';
 import fs from 'fs';
 import TreeSitter from 'tree-sitter';
 import TreeSitterJavaScript from 'tree-sitter-javascript';
